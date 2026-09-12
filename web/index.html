@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f1115" />
+  <title>holehe</title>
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <header>
+    <h1>holehe</h1>
+    <p class="sub">Check where an email is registered</p>
+  </header>
+
+  <section class="card">
+    <label for="email">Email</label>
+    <input id="email" type="email" inputmode="email" autocomplete="email"
+           placeholder="name@example.com" enterkeyhint="go" />
+    <button id="run" type="button">Run</button>
+    <div id="status" aria-live="polite"></div>
+  </section>
+
+  <section id="panel" class="card hidden">
+    <div class="meta" id="meta"></div>
+    <div class="filters" id="filters">
+      <button type="button" data-filter="all" class="active">All</button>
+      <button type="button" data-filter="used">Used</button>
+      <button type="button" data-filter="not_used">Not used</button>
+      <button type="button" data-filter="rate_limit">Rate limit</button>
+      <button type="button" data-filter="error">Error</button>
+    </div>
+    <ul id="results"></ul>
+  </section>
+
+  <p class="disclaimer">
+    Adults / OSINT only. Use only on emails you own or are authorized to investigate.
+    Results may be incomplete or wrong. Not for harassment, stalking, or illegal use.
+  </p>
+
+  <script>
+    const emailEl = document.getElementById("email");
+    const runBtn = document.getElementById("run");
+    const statusEl = document.getElementById("status");
+    const panel = document.getElementById("panel");
+    const meta = document.getElementById("meta");
+    const resultsEl = document.getElementById("results");
+    const filters = document.getElementById("filters");
+
+    let lastResults = [];
+    let activeFilter = "all";
+    let tickTimer = null;
+    let startedAt = 0;
+
+    const badge = {
+      used: "[+]",
+      not_used: "[-]",
+      rate_limit: "[x]",
+      error: "[!]",
+    };
+
+    function setStatus(html, cls) {
+      statusEl.className = cls || "";
+      statusEl.innerHTML = html;
+    }
+
+    function renderMeta(data) {
+      const c = data.counts;
+      meta.innerHTML = `
+        <span class="pill">${data.seconds}s</span>
+        <span class="pill used">${c.used} used</span>
+        <span class="pill not_used">${c.not_used} not</span>
+        <span class="pill rate_limit">${c.rate_limit} limit</span>
+        <span class="pill error">${c.error} err</span>
+        <span class="pill">${c.total} sites</span>
+      `;
+    }
+
+    function renderResults() {
+      const rows = activeFilter === "all"
+        ? lastResults
+        : lastResults.filter((r) => r.status === activeFilter);
+      resultsEl.innerHTML = rows.map((r) => {
+        const extras = [];
+        if (r.emailrecovery) extras.push(r.emailrecovery);
+        if (r.phoneNumber) extras.push(r.phoneNumber);
+        if (r.others && r.others.FullName) extras.push(r.others.FullName);
+        const extra = extras.length
+          ? `<div class="extra">${extras.join(" · ")}</div>`
+          : "";
+        return `<li>
+          <span class="badge ${r.status}">${badge[r.status] || "[?]"}</span>
+          <div class="site">
+            <div class="domain">${r.domain || r.name}</div>
+            ${extra}
+          </div>
+        </li>`;
+      }).join("");
+    }
+
+    filters.addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-filter]");
+      if (!btn) return;
+      activeFilter = btn.dataset.filter;
+      filters.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
+      renderResults();
+    });
+
+    async function runScan() {
+      const email = (emailEl.value || "").trim();
+      if (!email || !email.includes("@")) {
+        setStatus("Enter a valid email.", "error");
+        return;
+      }
+      runBtn.disabled = true;
+      panel.classList.add("hidden");
+      lastResults = [];
+      startedAt = Date.now();
+      setStatus('<span class="spinner"></span>Scanning… 0s', "");
+      tickTimer = setInterval(() => {
+        const s = ((Date.now() - startedAt) / 1000).toFixed(0);
+        setStatus(`<span class="spinner"></span>Scanning… ${s}s`, "");
+      }, 500);
+
+      try {
+        const res = await fetch("/api/scan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.detail || res.statusText || "Scan failed");
+        }
+        lastResults = data.results || [];
+        renderMeta(data);
+        renderResults();
+        panel.classList.remove("hidden");
+        setStatus(`Done in ${data.seconds}s — ${data.counts.used} used.`, "ok");
+      } catch (err) {
+        setStatus(String(err.message || err), "error");
+      } finally {
+        clearInterval(tickTimer);
+        runBtn.disabled = false;
+      }
+    }
+
+    runBtn.addEventListener("click", runScan);
+    emailEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") runScan();
+    });
+  </script>
+</body>
+</html>

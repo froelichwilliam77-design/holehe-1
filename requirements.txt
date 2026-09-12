@@ -1,0 +1,9 @@
+httpx
+trio
+beautifulsoup4
+termcolor
+tqdm
+colorama
+fastapi
+uvicorn
+holehe @ git+https://github.com/froelichwilliam77-design/holehe-1.git@perf/pr277-concurrency
